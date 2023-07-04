@@ -11,7 +11,7 @@ use nom::{
     branch::alt,
     bytes::complete::tag,
     character::complete::{alpha1, anychar, char, digit1, one_of, space0},
-    combinator::{fail, opt, peek, verify},
+    combinator::{fail, opt, verify},
     error::Error,
     multi::many_till,
     IResult,
@@ -82,6 +82,7 @@ fn fpl_grade(s: &str) -> IResult<&str, &str> {
         tag("for this position is"),
         tag("is at the"),
         tag("is at"),
+        tag("is level:"),
         tag("is the"),
         tag("is"),
         tag("of position is"),
@@ -131,14 +132,12 @@ fn grade(s: &str) -> IResult<&str, &str> {
             let (s, grade_or_series) = max_digits(4, s)?;
 
             if let Ok((s, _)) = char::<&str, Error<&str>>(sep)(s) {
-                if let Ok((_, digits)) = peek(digit1::<&str, Error<&str>>)(s) {
-                    if !digits.is_empty() {
-                        return max_digits(2, s);
-                    }
+                if let Ok((s, grade)) = max_digits(2, s) {
+                    return Ok((s, grade));
                 }
+            }
 
-                Ok((s, grade_or_series))
-            } else if grade_or_series.len() <= 2 {
+            if grade_or_series.len() <= 2 {
                 Ok((s, grade_or_series))
             } else {
                 fail(s)
@@ -180,12 +179,7 @@ fn print_records_with_grades(records: &[Record]) -> Result<()> {
 
     for record in records {
         let text = normalize(&record.text);
-
-        let grade = if let Some(grade) = get_fpl_grade(&text) {
-            grade
-        } else {
-            ""
-        };
+        let grade = get_fpl_grade(&text).unwrap_or_default();
 
         writer.write_record([record.id.to_string().as_str(), grade, &record.text])?;
     }
@@ -312,7 +306,7 @@ mod tests {
         assert_eq!(grade("gs-0998-6"), Ok(("", "6")));
         assert_eq!(grade("gs-13"), Ok(("", "13")));
         assert_eq!(grade("gs-13.xxx"), Ok((".xxx", "13")));
-        assert_eq!(grade("gs-13-"), Ok(("", "13")));
+        assert_eq!(grade("gs-13-"), Ok(("-", "13")));
         assert_eq!(grade("gs-201-13"), Ok(("", "13")));
         assert_eq!(grade("gs-7"), Ok(("", "7")));
         assert_eq!(grade("gs15"), Ok(("", "15")));
@@ -326,6 +320,7 @@ mod tests {
         assert!(grade("123").is_err());
         assert!(grade("gs 123").is_err());
         assert!(grade("gs-123").is_err());
+        assert!(grade("gs-1234-").is_err());
         assert!(grade("gs-1234-123").is_err());
         assert!(grade("gs-12345-12").is_err());
         assert!(grade("gs123").is_err());
