@@ -9,8 +9,8 @@ use html_escape::encode_text;
 
 use nom::{
     branch::alt,
-    bytes::complete::tag,
-    character::complete::{alpha1, anychar, char, digit1, one_of, space0},
+    bytes::complete::{tag, tag_no_case},
+    character::complete::{alpha1, anychar, char, digit1, multispace0, one_of},
     combinator::{fail, opt, verify},
     error::Error,
     multi::many_till,
@@ -32,7 +32,7 @@ struct Args {
 
 #[derive(Deserialize)]
 struct Record {
-    id: i64,
+    id: usize,
     text: String,
 }
 
@@ -40,35 +40,41 @@ fn alphas(count: usize, s: &str) -> IResult<&str, &str> {
     verify(alpha1, |s: &str| s.len() == count)(s)
 }
 
+fn dedup_records(records: &mut Vec<Record>) {
+    records.iter_mut().for_each(|r| r.text = normalize(&r.text));
+    records.sort_by(|a, b| a.text.cmp(&b.text));
+    records.dedup_by(|a, b| a.text == b.text);
+}
+
 fn fpl(s: &str) -> IResult<&str, &str> {
-    if let Ok((s, fpl)) = tag::<&str, &str, Error<&str>>("fpl")(s) {
+    if let Ok((s, fpl)) = tag_no_case::<&str, &str, Error<&str>>("fpl")(s) {
         return Ok((s, fpl));
     }
 
     let start = s;
 
-    let (s, _) = tag("full")(s)?;
+    let (s, _) = tag_no_case("full")(s)?;
     let (s, _) = opt_one_of(" -", s)?;
 
     let (s, _) = alt((
-        tag("peformance"),
-        tag("perf."),
-        tag("perfformance"),
-        tag("performance"),
-        tag("performane"),
-        tag("perfromance"),
-        tag("perormance"),
+        tag_no_case("peformance"),
+        tag_no_case("perf."),
+        tag_no_case("perfformance"),
+        tag_no_case("performance"),
+        tag_no_case("performane"),
+        tag_no_case("perfromance"),
+        tag_no_case("perormance"),
     ))(s)?;
 
-    let (s, _) = space0(s)?;
-    let (s, _) = opt(tag("level"))(s)?;
+    let (s, _) = multispace0(s)?;
+    let (s, _) = opt(tag_no_case("level"))(s)?;
 
     Ok((s, &start[0..start.len() - s.len()]))
 }
 
 fn fpl_grade(s: &str) -> IResult<&str, &str> {
     let (s, _) = fpl(s)?;
-    let (s, _) = space0(s)?;
+    let (s, _) = multispace0(s)?;
 
     let (s, _) = opt(alt((
         tag("-"),
@@ -76,23 +82,23 @@ fn fpl_grade(s: &str) -> IResult<&str, &str> {
         tag(":"),
         tag("("),
         tag("="),
-        tag("at grade level"),
-        tag("at"),
-        tag("for this pd is"),
-        tag("for this position is"),
-        tag("is at the"),
-        tag("is at"),
-        tag("is level:"),
-        tag("is the"),
-        tag("is"),
-        tag("of position is"),
-        tag("of position:"),
-        tag("of the position is"),
-        tag("of this pd is"),
-        tag("of this position is"),
+        words(&["at", "grade", "level"]),
+        tag_no_case("at"),
+        words(&["for", "this", "pd", "is"]),
+        words(&["for", "this", "position", "is"]),
+        words(&["is", "at", "the"]),
+        words(&["is", "at"]),
+        words(&["is", "level", ":"]),
+        words(&["is", "the"]),
+        tag_no_case("is"),
+        words(&["of", "position", "is"]),
+        words(&["of", "position", ":"]),
+        words(&["of", "the", "position", "is"]),
+        words(&["of", "this", "pd", "is"]),
+        words(&["of", "this", "position", "is"]),
     )))(s)?;
 
-    let (s, _) = space0(s)?;
+    let (s, _) = multispace0(s)?;
 
     grade(s)
 }
@@ -148,12 +154,16 @@ fn grade(s: &str) -> IResult<&str, &str> {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let records = read_records(args.input)?;
+    let mut records = read_records(args.input)?;
 
     if args.unique {
-        print_unique_texts(&records, args.html);
+        dedup_records(&mut records);
+    }
+
+    if args.html {
+        print_html(&records, !args.unique);
     } else {
-        print_records_with_grades(&records)?;
+        print_csv(&records, !args.unique)?;
     }
 
     Ok(())
@@ -174,82 +184,76 @@ fn opt_one_of<'a>(list: &str, s: &'a str) -> IResult<&'a str, Option<char>> {
     opt(one_of(list))(s)
 }
 
-fn print_records_with_grades(records: &[Record]) -> Result<()> {
+fn print_csv(records: &[Record], print_ids: bool) -> Result<()> {
     let mut writer = WriterBuilder::new().from_writer(stdout());
 
     for record in records {
-        let text = normalize(&record.text);
-        let grade = get_fpl_grade(&text).unwrap_or_default();
+        let grade = get_fpl_grade(&record.text).unwrap_or_default();
 
-        writer.write_record([record.id.to_string().as_str(), grade, &record.text])?;
+        if print_ids {
+            writer.write_record([record.id.to_string().as_str(), grade, &record.text])?;
+        } else {
+            writer.write_record([grade, &record.text])?;
+        }
     }
 
     Ok(())
 }
 
-fn print_unique_texts(records: &[Record], html: bool) {
-    let mut unique_texts: Vec<_> = records
-        .iter()
-        .map(|record| normalize(&record.text))
-        .collect();
+fn print_html(records: &[Record], print_ids: bool) {
+    println!("<!doctype html>");
+    println!("<html lang='en'>");
+    println!("\t<body>");
+    println!("\t<style>");
+    println!("\t.fpl {{color: red}}");
+    println!("\ttable, td, th {{border: 1px solid; border-collapse: collapse}}");
+    println!("\t</style>");
+    println!("\t\t<table>");
+    println!("\t\t\t<thead>");
+    println!("\t\t\t\t<tr>");
 
-    unique_texts.sort();
-    unique_texts.dedup();
+    println!(
+        "\t\t\t\t\t<th scope='col'>{}</th>",
+        if print_ids { "ID" } else { "Line" }
+    );
 
-    if html {
-        println!("<!doctype html>");
-        println!("<html lang='en'>");
-        println!("\t<body>");
-        println!("\t<style>");
-        println!("\t.fpl {{color: red}}");
-        println!("\ttable, td, th {{border: 1px solid; border-collapse: collapse}}");
-        println!("\t</style>");
-        println!("\t\t<table>");
-        println!("\t\t\t<thead>");
+    println!("\t\t\t\t\t<th scope='col'>Grade</th>");
+    println!("\t\t\t\t\t<th scope='col'>Text</th>");
+    println!("\t\t\t\t</tr>");
+    println!("\t\t\t</thead>");
+    println!("\t\t\t<tbody>");
+
+    for (i, record) in records.iter().enumerate() {
         println!("\t\t\t\t<tr>");
-        println!("\t\t\t\t\t<th scope='col'>Line</th>");
-        println!("\t\t\t\t\t<th scope='col'>Grade</th>");
-        println!("\t\t\t\t\t<th scope='col'>Text</th>");
+
+        println!(
+            "\t\t\t\t\t<td>{}</td>",
+            if print_ids { record.id } else { i + 1 }
+        );
+
+        if let Some(grade) = get_fpl_grade(&record.text) {
+            println!("\t\t\t\t\t<td>{grade}</td>");
+
+            let (prefix, suffix) = get_match_prefix_and_suffix(&record.text, grade);
+
+            println!(
+                "\t\t\t\t\t<td>{}<span class='fpl'>{}</span>{}</td>",
+                encode_text(prefix),
+                encode_text(grade),
+                encode_text(suffix)
+            );
+        } else {
+            println!("\t\t\t\t\t<td></td>");
+            println!("\t\t\t\t\t<td>{}</td>", encode_text(&record.text));
+        }
+
         println!("\t\t\t\t</tr>");
-        println!("\t\t\t</thead>");
-        println!("\t\t\t<tbody>");
-
-        for (line, text) in unique_texts.iter().enumerate() {
-            println!("\t\t\t\t<tr>");
-            println!("\t\t\t\t\t<td>{}</td>", line + 1);
-
-            if let Some(grade) = get_fpl_grade(text) {
-                println!("\t\t\t\t\t<td>{grade}</td>");
-
-                let (prefix, suffix) = get_match_prefix_and_suffix(text, grade);
-
-                println!(
-                    "\t\t\t\t\t<td>{}<span class='fpl'>{}</span>{}</td>",
-                    encode_text(prefix),
-                    encode_text(grade),
-                    encode_text(suffix)
-                );
-            } else {
-                println!("\t\t\t\t\t<td></td>");
-                println!("\t\t\t\t\t<td>{}</td>", encode_text(text));
-            }
-
-            println!("\t\t\t\t</tr>");
-        }
-
-        println!("\t\t\t</tbody>");
-        println!("\t\t</table>");
-        println!("\t</body>");
-        println!("</html>");
-    } else {
-        for text in unique_texts {
-            if let Some(grade) = get_fpl_grade(&text) {
-                print!("{grade}");
-            }
-
-            println!("|{text}");
-        }
     }
+
+    println!("\t\t\t</tbody>");
+    println!("\t\t</table>");
+    println!("\t</body>");
+    println!("</html>");
 }
 
 fn read_records<P>(path: P) -> Result<Vec<Record>>
@@ -264,6 +268,19 @@ where
     }
 
     Ok(records)
+}
+
+fn words(words: &'static [&str]) -> impl FnMut(&str) -> IResult<&str, &str> {
+    move |s| {
+        let mut i = s;
+
+        for word in words {
+            i = multispace0(i)?.0;
+            i = tag_no_case(*word)(i)?.0;
+        }
+
+        Ok((i, &s[0..s.len() - s.len()]))
+    }
 }
 
 #[cfg(test)]

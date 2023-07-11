@@ -1,1 +1,5 @@
 /target
+
+*.csv
+*.html
+*.txt
