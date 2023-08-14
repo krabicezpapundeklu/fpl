@@ -80,12 +80,14 @@ fn fpl_grade(s: &str) -> IResult<&str, &str> {
     let (s, _) = multispace0(s)?;
 
     let (s, _) = opt(alt((
-        tag("-"),
-        tag(","),
-        tag(":"),
-        tag("(fpl)"),
-        tag("("),
-        tag("="),
+        alt((
+            tag("-"),
+            tag(","),
+            tag(":"),
+            tag("(fpl)"),
+            tag("("),
+            tag("="),
+        )),
         words(&["at", "grade", "level"]),
         tag_no_case("at"),
         words(&["for", "this", "pd", "is"]),
@@ -96,6 +98,8 @@ fn fpl_grade(s: &str) -> IResult<&str, &str> {
         words(&["is", "the"]),
         words(&["management", "analyst"]),
         tag_no_case("is"),
+        words(&["of", "a", "career", "ladder", "position"]),
+        words(&["of", "a"]),
         words(&["of", "position", "is"]),
         words(&["of", "position", ":"]),
         words(&["of", "the", "position", "is"]),
@@ -105,7 +109,7 @@ fn fpl_grade(s: &str) -> IResult<&str, &str> {
 
     let (s, _) = multispace0(s)?;
 
-    grade(s)
+    max_grade(s)
 }
 
 fn get_fpl_grade(s: &str) -> Option<&str> {
@@ -179,6 +183,22 @@ fn main() -> Result<()> {
 
 fn max_digits(count: usize, s: &str) -> IResult<&str, &str> {
     verify(digit1, |s: &str| s.len() <= count)(s)
+}
+
+fn max_grade(s: &str) -> IResult<&str, &str> {
+    let (mut s, mut max_grade) = grade(s)?;
+
+    loop {
+        (s, _) = multispace0(s)?;
+        (s, _) = opt_one_of(",/", s)?;
+        (s, _) = multispace0(s)?;
+
+        if let Ok((gs, grade)) = grade(s) {
+            (s, max_grade) = (gs, grade);
+        } else {
+            return Ok((s, max_grade));
+        }
+    }
 }
 
 fn normalize(text: &str) -> String {
@@ -285,12 +305,13 @@ fn target_grade(s: &str) -> IResult<&str, &str> {
 
     let (s, _) = opt(alt((
         tag_no_case("to"),
-        words(&["position", ","])
+        words(&["position", ","]),
+        words(&["position", "posted", "as", "at", "a"]),
     )))(s)?;
 
     let (s, _) = multispace0(s)?;
 
-    grade(s)
+    max_grade(s)
 }
 
 fn words(words: &'static [&str]) -> impl FnMut(&str) -> IResult<&str, &str> {
@@ -365,6 +386,12 @@ mod tests {
         assert!(grade("gs-1234-123").is_err());
         assert!(grade("gs-12345-12").is_err());
         assert!(grade("gs123").is_err());
+    }
+
+    #[test]
+    fn test_max_grade() {
+        assert_eq!(max_grade("gs-11/12/13"), Ok(("", "13")));
+        assert_eq!(max_grade("gs-5 / gs-6 / gs-7"), Ok(("", "7")));
     }
 
     #[test]
