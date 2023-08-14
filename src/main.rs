@@ -111,6 +111,8 @@ fn fpl_grade(s: &str) -> IResult<&str, &str> {
 fn get_fpl_grade(s: &str) -> Option<&str> {
     if let Ok((_, (_, grade))) = many_till(anychar, fpl_grade)(s) {
         Some(grade)
+    } else if let Ok((_, (_, grade))) = many_till(anychar, target_grade)(s) {
+        Some(grade)
     } else {
         None
     }
@@ -274,6 +276,21 @@ where
     }
 
     Ok(records)
+}
+
+fn target_grade(s: &str) -> IResult<&str, &str> {
+    let (s, _) = tag_no_case("target")(s)?;
+    let (s, _) = opt(tag_no_case("ed"))(s)?;
+    let (s, _) = multispace0(s)?;
+
+    let (s, _) = opt(alt((
+        tag_no_case("to"),
+        words(&["position", ","])
+    )))(s)?;
+
+    let (s, _) = multispace0(s)?;
+
+    grade(s)
 }
 
 fn words(words: &'static [&str]) -> impl FnMut(&str) -> IResult<&str, &str> {
