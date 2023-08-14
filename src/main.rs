@@ -136,6 +136,7 @@ fn grade(s: &str) -> IResult<&str, &str> {
 
     let (s, _) = alphas(2, s)?;
     let (s, sep) = opt_one_of(" -.", s)?;
+    let (s, _) = opt(tag(" "))(s)?;
 
     match sep {
         None | Some(' ') => max_digits(2, s),
@@ -327,6 +328,7 @@ mod tests {
         assert_eq!(grade("gs-0510-09"), Ok(("", "09")));
         assert_eq!(grade("gs-0998-6"), Ok(("", "6")));
         assert_eq!(grade("gs-13"), Ok(("", "13")));
+        assert_eq!(grade("gs- 13"), Ok(("", "13")));
         assert_eq!(grade("gs-13.xxx"), Ok((".xxx", "13")));
         assert_eq!(grade("gs-13-"), Ok(("-", "13")));
         assert_eq!(grade("gs-201-13"), Ok(("", "13")));
