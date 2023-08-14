@@ -53,10 +53,12 @@ fn fpl(s: &str) -> IResult<&str, &str> {
 
     let start = s;
 
-    let (s, _) = tag_no_case("full")(s)?;
+    let (s, _) = alt((tag_no_case("full"), tag_no_case("poll")))(s)?;
     let (s, _) = opt_one_of(" -", s)?;
 
     let (s, _) = alt((
+        words(&["career", "ladder", "grade"]),
+        tag_no_case("grade"),
         tag_no_case("peformance"),
         tag_no_case("perf."),
         tag_no_case("perfformance"),
@@ -64,6 +66,7 @@ fn fpl(s: &str) -> IResult<&str, &str> {
         tag_no_case("performane"),
         tag_no_case("perfromance"),
         tag_no_case("perormance"),
+        tag_no_case("promotion"),
     ))(s)?;
 
     let (s, _) = multispace0(s)?;
@@ -80,6 +83,7 @@ fn fpl_grade(s: &str) -> IResult<&str, &str> {
         tag("-"),
         tag(","),
         tag(":"),
+        tag("(fpl)"),
         tag("("),
         tag("="),
         words(&["at", "grade", "level"]),
@@ -90,6 +94,7 @@ fn fpl_grade(s: &str) -> IResult<&str, &str> {
         words(&["is", "at"]),
         words(&["is", "level", ":"]),
         words(&["is", "the"]),
+        words(&["management", "analyst"]),
         tag_no_case("is"),
         words(&["of", "position", "is"]),
         words(&["of", "position", ":"]),
